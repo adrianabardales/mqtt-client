@@ -4,12 +4,48 @@
 #include <Arduino.h>
 #include "secrets.h"
 #include "WiFi.h"
+#include <PubSubClient.h>
 
 const char *ssid = WIFI_SSID;
 const char *password = WIFI_PASSWORD;
 
-const char *host = "10.20.60.31";
-const int port = 10000;
+const char *host = "maisonneuve.aws.thinger.io";
+const int port = 1883;
+
+//credentials for thinger.io
+const char *thinger_username = THINGER_USERNAME;
+const char *thinger_device_id = THINGER_DEVICE_ID;
+const char *thinger_device_credential = THINGER_DEVICE_CREDENTIAL;
+
+WiFiClient wifiClient;
+void callback(char* topic, byte* payload, unsigned int length) {
+  // handle message arrived
+}
+
+PubSubClient client(wifiClient);
+
+void connectToThinger() {
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection to thinger.io...");
+    
+    // Create MQTT client ID
+    String clientId = thinger_device_id;
+    
+    // Connect with username and password
+    if (client.connect(clientId.c_str(), thinger_username, thinger_device_credential)) {
+      Serial.println("connected");
+      
+      // Subscribe to device commands topic
+      String subscribe_topic = String(thinger_username) + "/devices/" + thinger_device_id + "/cmd";
+      client.subscribe(subscribe_topic.c_str());
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
 
 String translateEncryptionType(wifi_auth_mode_t encryptionType)
 {
@@ -74,39 +110,38 @@ void connectToNetwork()
     Serial.println("Establishing connection to WiFi..");
   }
 
-  Serial.println("Connected to network");
-}
-
-void sendMessageToTCPServer() {
-  Serial.println("Send TCP message to server");
-  WiFiClient client;
-  if (!client.connect(host, port))
-  {
-    Serial.println("connection failed");
-    return;
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nConnected to network");
+  } else {
+    Serial.println("\nWiFi connection failed");
   }
-  client.print("My name is ESP32-Teacher");
-  client.stop();
 }
 
 void setup()
 {
-
   Serial.begin(115200);
+  delay(1000);
 
   // Print MAC address
   Serial.println("MCU MAC address: " + WiFi.macAddress());
-
 
   scanNetworks();
   connectToNetwork();
 
   Serial.println(WiFi.macAddress());
   Serial.println(WiFi.localIP());
+
+  // configure MQTT client
+  client.setServer(host, port);
+  client.setCallback(callback);
 }
 
 void loop()
 {
-  sendMessageToTCPServer();
+  if (!client.connected()) {
+    connectToThinger();
+  }
+  client.loop();
+
   delay(2000);
 }
