@@ -20,10 +20,43 @@ const char *thinger_device_credential = THINGER_DEVICE_CREDENTIAL;
 // ---- HC-SR04 configuration ----
 const int TRIG_PIN = 2; // trigger -> GPIO2
 const int ECHO_PIN = 3; // echo    -> GPIO3
+const int LED_VERTE = 4;
+const int LED_JAUNE = 10;
+const int LED_ROUGE = 9;
 
 WiFiClient wifiClient;
+
+bool publishEnabled = false; // allow toggling publishing via cmd_captor
 void callback(char* topic, byte* payload, unsigned int length) {
-  // handle message arrived
+  // print topic and payload
+  String topicStr = String(topic);
+  String message;
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+  Serial.print("Message arrived [");
+  Serial.print(topicStr);
+  Serial.print("]: ");
+  Serial.println(message);
+
+  bool isCaptorTopic = topicStr == "cmd_captor" || topicStr.endsWith("cmd_captor");
+
+  // handle captor commands on topic ending with /cmd_captor
+  if (isCaptorTopic) {
+    if (length == 1 && payload[0] == '1') {
+      publishEnabled = true;
+      Serial.println("Publishing enabled");
+    } else if (length == 1 && payload[0] == '0') {
+      publishEnabled = false;
+      Serial.println("Publishing disabled");
+      digitalWrite(LED_VERTE, LOW);
+      digitalWrite(LED_JAUNE, LOW);
+      digitalWrite(LED_ROUGE, LOW);
+    } else {
+      // other payloads can be handled here
+      Serial.println("Unknown cmd_captor payload");
+    }
+  }
 }
 
 PubSubClient client(wifiClient);
@@ -41,7 +74,22 @@ void connectToThinger() {
       
       // Subscribe to device commands topic
       String subscribe_topic = String(thinger_username) + "/devices/" + thinger_device_id + "/cmd";
-      client.subscribe(subscribe_topic.c_str());
+      bool ok1 = client.subscribe(subscribe_topic.c_str());
+      Serial.print("subscribe -> "); Serial.print(subscribe_topic); Serial.print(" : "); Serial.println(ok1 ? "OK" : "FAILED");
+
+      // Subscribe to captor-specific command topic "cmd_captor" under your thinger namespace
+      String subscribe_captor = String(thinger_username) + "/devices/" + thinger_device_id + "/cmd_captor";
+      bool ok2 = client.subscribe(subscribe_captor.c_str());
+      Serial.print("subscribe -> "); Serial.print(subscribe_captor); Serial.print(" : "); Serial.println(ok2 ? "OK" : "FAILED");
+
+      // ALSO subscribe to the plain topic "cmd_captor" in case the other device publishes there
+      bool ok3 = client.subscribe("cmd_captor");
+      Serial.print("subscribe -> cmd_captor : "); Serial.println(ok3 ? "OK" : "FAILED");
+
+      if (!ok1 || !ok2 || !ok3) {
+        Serial.print("One or more subscribes failed, client.state()=");
+        Serial.println(client.state());
+      }
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -136,6 +184,35 @@ float measureDistanceCM() {
   // Convert to centimeters: speed of sound ~343 m/s -> 0.0343 cm/us
   float distanceCm = (duration * 0.0343f) / 2.0f;
   return distanceCm;
+
+}
+
+void updateLeds(float distanceCm) {
+  if (distanceCm < 0.0f) {
+    // timeout / out of range -> turn off all
+    digitalWrite(LED_VERTE, LOW);
+    digitalWrite(LED_JAUNE, LOW);
+    digitalWrite(LED_ROUGE, LOW);
+    return;
+  }
+
+  if (distanceCm > 40.0f) {
+    digitalWrite(LED_VERTE, LOW);
+    digitalWrite(LED_JAUNE, LOW);
+    digitalWrite(LED_ROUGE, LOW);
+  } else if (distanceCm > 25.0f) {
+    digitalWrite(LED_VERTE, HIGH);
+    digitalWrite(LED_JAUNE, LOW);
+    digitalWrite(LED_ROUGE, LOW);
+  } else if (distanceCm > 10.0f) {
+    digitalWrite(LED_VERTE, HIGH);
+    digitalWrite(LED_JAUNE, HIGH);
+    digitalWrite(LED_ROUGE, LOW);
+  } else {
+    digitalWrite(LED_VERTE, HIGH);
+    digitalWrite(LED_JAUNE, HIGH);
+    digitalWrite(LED_ROUGE, HIGH);
+  }
 }
 
 void setup()
@@ -147,6 +224,12 @@ void setup()
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   digitalWrite(TRIG_PIN, LOW);
+  pinMode(LED_VERTE, OUTPUT);
+  pinMode(LED_JAUNE, OUTPUT);
+  pinMode(LED_ROUGE, OUTPUT);
+  digitalWrite(LED_VERTE, LOW);
+  digitalWrite(LED_JAUNE, LOW);
+  digitalWrite(LED_ROUGE, LOW);
 
   // Print MAC address
   Serial.println("MCU MAC address: " + WiFi.macAddress());
@@ -173,11 +256,13 @@ void loop()
 
   unsigned long now = millis();
   float dist = measureDistanceCM();
-  if (dist >= 0.0f && now - last > 2000) {
+  if (dist >= 0.0f && now - last > 1000 && publishEnabled) {
     Serial.print("Distance: ");
     Serial.print(dist);
     Serial.println(" cm");
     last = now;
+
+    updateLeds(dist);
 
     String topic = "Proximity";
     String payload = String(dist);
