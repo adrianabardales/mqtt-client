@@ -1,6 +1,6 @@
 // WiFi credentials
-#define WIFI_SSID "IOT-6220"
-#define WIFI_PASSWORD "6220M@cSelection"
+#define WIFI_SSID "iPhone 14 Adr"
+#define WIFI_PASSWORD "micontra"
 
 // Thinger.io credentials - get these from your thinger.io dashboard
 #define THINGER_USERNAME "adrilazo"

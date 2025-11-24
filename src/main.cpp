@@ -17,6 +17,10 @@ const char *thinger_username = THINGER_USERNAME;
 const char *thinger_device_id = THINGER_DEVICE_ID;
 const char *thinger_device_credential = THINGER_DEVICE_CREDENTIAL;
 
+// ---- HC-SR04 configuration ----
+const int TRIG_PIN = 2; // trigger -> GPIO2
+const int ECHO_PIN = 3; // echo    -> GPIO3
+
 WiFiClient wifiClient;
 void callback(char* topic, byte* payload, unsigned int length) {
   // handle message arrived
@@ -117,10 +121,32 @@ void connectToNetwork()
   }
 }
 
+float measureDistanceCM() {
+  // Send trigger pulse
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  // Read echo pulse duration (timeout 30ms -> ~5 meters)
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000UL);
+  if (duration == 0) return -1.0f;
+
+  // Convert to centimeters: speed of sound ~343 m/s -> 0.0343 cm/us
+  float distanceCm = (duration * 0.0343f) / 2.0f;
+  return distanceCm;
+}
+
 void setup()
 {
   Serial.begin(115200);
   delay(1000);
+
+  // configure HC-SR04 pins
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  digitalWrite(TRIG_PIN, LOW);
 
   // Print MAC address
   Serial.println("MCU MAC address: " + WiFi.macAddress());
@@ -136,6 +162,8 @@ void setup()
   client.setCallback(callback);
 }
 
+unsigned long last = 0;
+
 void loop()
 {
   if (!client.connected()) {
@@ -143,5 +171,17 @@ void loop()
   }
   client.loop();
 
-  delay(2000);
+  unsigned long now = millis();
+  float dist = measureDistanceCM();
+  if (dist >= 0.0f && now - last > 2000) {
+    Serial.print("Distance: ");
+    Serial.print(dist);
+    Serial.println(" cm");
+    last = now;
+
+    String topic = "Proximity";
+    String payload = String(dist);
+    client.publish(topic.c_str(), payload.c_str());
+  } 
+
 }
